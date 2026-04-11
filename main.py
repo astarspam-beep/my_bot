@@ -1,43 +1,19 @@
 import os
 import asyncio
-from flask import Flask
-from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
-# --- ЧАСТИНА ДЛЯ ПІДТРИМКИ ЖИТТЄДІЯЛЬНОСТІ (Щоб Render не вимикав бота) ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Бот працює!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# --- НАЛАШТУВАННЯ БОТА ---
-# Ми беремо токен та ID адміна з налаштувань Render (Environment Variables)
-TOKEN = os.environ.get('BOT_TOKEN')
-ADMIN_ID = os.environ.get('ADMIN_ID')
+# Налаштування
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Стани для анкети
-class Form(StatesGroup):
-    name = State()
-    phone = State()
-    idea = State()
+# --- КЛАВІАТУРИ ---
 
-# Головне меню (нижні кнопки)
-def main_menu():
+def get_main_menu():
     buttons = [
         [KeyboardButton(text="Свіжі квіти 🌸"), KeyboardButton(text="Гострі ножі 🔪")],
         [KeyboardButton(text="Чиста вода та повітря 💧"), KeyboardButton(text="Тверезий водій 🚗")],
@@ -46,87 +22,65 @@ def main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# Кнопки під текстом розділу
-def order_menu(is_idea=False):
-    btn_text = "✅ Описати ідею" if is_idea else "✅ Оформити та забути"
-    buttons = [
-        [KeyboardButton(text=btn_text)],
-        [KeyboardButton(text="⬅️ Повернутися")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-# Обробка команди /start
-@dp.message(CommandStart())
-async def cmd_start(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Ваш час занадто цінний, щоб витрачати його на дрібниці. Оберіть сферу, яку ми візьмемо під свій контроль:",
-        reply_markup=main_menu()
+def get_contact_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Поділитися контактом 📱", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
 
-# Відображення розділів
-@dp.message(F.text.in_([
-    "Свіжі квіти 🌸", "Гострі ножі 🔪", "Чиста вода та повітря 💧", 
-    "Тверезий водій 🚗", "Стильний бокс 🧦", "Speak-партнер 🎙️", "Особистий запит 🎯"
-]))
-async def show_section(message: types.Message):
-    content = {
-        "Свіжі квіти 🌸": "✨ Створіть атмосферу свята... Достатньо один раз налаштувати підписку.\n\nВартість: від 400 грн.",
-        "Гострі ножі 🔪": "✨ Вам більше не потрібно боротися з тупими лезами... Вартість: від 300 грн.",
-        "Чиста вода та повітря 💧": "✨ Здоров’я та енергія починаються з води... Вартість: від 500 грн.",
-        "Тверезий водій 🚗": "✨ Ваш персональний водій буде готовий до виїзду... Вартість: від 800 грн.",
-        "Стильний бокс 🧦": "✨ Ваш ідеальний базовий гардероб... Вартість: від 450 грн.",
-        "Speak-партнер 🎙️": "✨ Професійний співрозмовник буде на зв'язку... Вартість: від 600 грн.",
-        "Особистий запит 🎯": "✨ Якщо у вас є особливе завдання або специфічна рутина... Вартість: Індивідуально."
-    }
-    text = content.get(message.text, "Оберіть дію:")
-    await message.answer(text, reply_markup=order_menu(message.text == "Особистий запит 🎯"))
+# --- ДАНІ ПОСЛУГ (ТЗ) ---
 
-# Початок оформлення
-@dp.message(F.text == "✅ Оформити та забути")
-async def start_standard(message: types.Message, state: FSMContext):
-    await message.answer("Щоб оформити заявку, напишіть, будь ласка, ваше Прізвище та Ім'я.")
-    await state.set_state(Form.name)
+SERVICES = {
+    "Свіжі квіти 🌸": "Ваш час занадто цінний, щоб витрачати його на черги в магазинах квітів. Ми подбаємо про те, щоб у вашому домі завжди була атмосфера свята та затишку. \n\nОтримуйте щотижня свіжий букет, підібраний нашими флористами відповідно до ваших уподобань. Доставка здійснюється у зручний для вас час.",
+    "Гострі ножі 🔪": "Ваш час занадто цінний, щоб витрачати його на боротьбу з тупими ножами. Ми подбаємо про те, щоб готування їжі приносило вам лише задоволення. \n\nНаш майстер забере ваші ножі, професійно заточить їх на спеціальному обладнанні та поверне ідеально гострими вже за кілька годин.",
+    "Чиста вода та повітря 💧": "Ваш час занадто цінний, щоб контролювати рівень фільтрів у вашому домі. Ми подбаємо про те, щоб ви та ваша родина дихали чистим повітрям та пили якісну воду. \n\nМи беремо на себе регулярну заміну фільтрів у ваших очищувачах та водяних системах. Вчасно, професійно, непомітно.",
+    "Тверезий водій 🚗": "Ваш час занадто цінний, щоб турбуватися про те, як безпечно дістатися додому після вечірки чи важкого дня. Ми подбаємо про вашу безпеку та комфорт. \n\nНаш професійний водій приїде за вказаною адресою та перевезе вас і ваш автомобіль у будь-яку точку міста. Комфортно та надійно.",
+    "Стильний бокс 🧦": "Ваш час занадто цінний, щоб шукати дрібниці, які постійно зникають або зношуються. Ми подбаємо про те, щоб ваш гардероб завжди був укомплектований. \n\nЩомісяця отримуйте набір якісних базових речей (шкарпетки, білизна тощо), підібраних під ваш розмір та стиль. Якість та зручність у кожному боксі.",
+    "Speak-партнер 🎙️": "Ваш час занадто цінний, щоб витрачати його на нудне вивчення мови. Ми подбаємо про те, щоб ваша розмовна практика була цікавою та продуктивною. \n\nОтримуйте регулярні дзвінки або зустрічі з цікавим співрозмовником для підтримки вашого рівня іноземної мови. Жодних підручників — тільки живе спілкування.",
+    "Особистий запит 🎯": "Ваш час занадто цінний, щоб витрачати його на рутину, яку можна делегувати. Ми подбаємо про те, щоб будь-яке ваше доручення було виконано ідеально. \n\nЗамовити рідкісний товар, знайти квитки, організувати сюрприз або виконати інше дрібне завдання — ми готові допомогти з будь-яким запитом."
+}
 
-@dp.message(F.text == "✅ Описати ідею")
-async def start_idea(message: types.Message, state: FSMContext):
-    await message.answer("Опишіть коротко, яку підписку ви хотіли б створити?")
-    await state.set_state(Form.idea)
+# --- ХЕНДЛЕРИ ---
 
-# Обробка ідеї
-@dp.message(Form.idea)
-async def process_idea(message: types.Message, state: FSMContext):
-    await state.update_data(user_idea=message.text)
-    await message.answer("Зрозумів! Тепер напишіть ваше Прізвище та Ім'я.")
-    await state.set_state(Form.name)
+@dp.message(Command("start"))
+async def start_handler(message: types.Message):
+    await message.answer(
+        "✨ Ваш час занадто цінний, щоб витрачати його на щоденну рутину. Ми створили цей сервіс, щоб звільнити вас для справді важливих справ.\n\n"
+        "Оберіть підписку на комфорт, яка вам підходить:",
+        reply_markup=get_main_menu()
+    )
 
-# Обробка ПІБ
-@dp.message(Form.name)
-async def process_name(message: types.Message, state: FSMContext):
-    await state.update_data(user_name=message.text)
-    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📱 Надіслати номер телефону", request_contact=True)]], resize_keyboard=True)
-    await message.answer("Дякую! Тепер натисніть кнопку нижче для зв'язку.", reply_markup=kb)
-    await state.set_state(Form.phone)
+@dp.message(F.text.in_(SERVICES.keys()))
+async def service_detail(message: types.Message):
+    service_text = SERVICES[message.text]
+    await message.answer(f"<b>{message.text}</b>\n\n{service_text}", parse_mode="HTML")
+    await message.answer("Щоб оформити заявку, натисніть кнопку нижче і поділіться номером телефону:", reply_markup=get_contact_keyboard())
 
-# Обробка телефону та фінал
-@dp.message(Form.phone, F.contact)
-async def process_phone(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    phone = message.contact.phone_number
+@dp.message(F.contact)
+async def handle_contact(message: types.Message):
+    # Відправка даних адміну
+    contact = message.contact
+    await bot.send_message(
+        ADMIN_ID,
+        f"🚀 НОВА ЗАЯВКА!\n"
+        f"Ім'я: {contact.first_name}\n"
+        f"Телефон: +{contact.phone_number}\n"
+        f"ID: {contact.user_id}"
+    )
     
-    # Повідомлення адміну
-    await bot.send_message(ADMIN_ID, f"🔔 НОВА ЗАЯВКА!\nКлієнт: {data['user_name']}\nТел: {phone}\nІдея: {data.get('user_idea', '-')}")
+    # Повідомлення клієнту
+    await message.answer(
+        "✅ Дякуємо! Ваша заявка прийнята. Наш менеджер зв'яжеться з вами найближчим часом для уточнення деталей.",
+        reply_markup=get_main_menu() # Повертаємо меню
+    )
     
-    await message.answer("Дякуємо! Вашу заявку прийнято. Менеджер зв'яжеться з вами. Гарного дня!", reply_markup=main_menu())
-    await state.clear()
-
-# Кнопка Повернутися
-@dp.message(F.text == "⬅️ Повернутися")
-async def back(message: types.Message, state: FSMContext):
-    await cmd_start(message, state)
+    await message.answer(
+        "Поки ми обробляємо ваш запит, ви можете переглянути інші наші сервіси, які зроблять ваше життя ще зручнішим 👇",
+        reply_markup=get_main_menu()
+    )
 
 async def main():
-    keep_alive() # Запускаємо міні-сайт для стабільної роботи
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
